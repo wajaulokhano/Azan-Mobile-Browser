@@ -1,0 +1,249 @@
+
+Create a complete Android project in Android Studio (Kotlin, Jetpack Compose) for two apps: a WebView-based browser ("Azan Browser") and a companion app ("Azan BRowser  Companion") that meet the following requirements. The project must be lightweight (3-6 MB total), macOS-compatible (no Linux), Play Store-compliant, and avoid large source builds (e.g., Bromite). Use prebuilt Android System WebView, bundle NSFWJS (1-2 MB) and EasyList/EasyPrivacy (~1-2 MB) in assets, and Scheherazade font for Shia-themed UI. Generate all necessary files, including code, manifests, resources, and assets structure.
+
+Azan Mobile  Browser App Requirements
+
+Core:
+
+Use prebuilt Android System WebView 
+Package name: com.example.noorahlulbayt.
+Android Studio, Kotlin, Jetpack Compose, min SDK 21 (Android 5.0).
+
+
+Features:
+
+Profanity Filtering:
+Scan document.body.innerText for keywords ("nude," "adult," "explicit," "porn," "sex," "xxx") and regex (\b(nudity|pornography|erotic)\b) using JavaScript in WebView (~10ms).
+Block page (load about:blank) if detected, add URL to Room database blocklist.
+
+
+Nudity Filtering:
+Capture 224x224 WebView screenshot, analyze with NSFWJS (assets: nsfwjs/nsfwjs.min.js, nsfwjs/model/, ~1-2 MB).
+Block if "Porn" probability > 0.8 (~500ms, 80-90% accuracy).
+Scroll trigger (500px, 500ms delay) for dynamic content (e.g., Facebook Reels, TikTok).
+Cache results in blocklist (Room, 24-hour expiry, ~1 MB).
+
+Ability to block tiktok and other social media websites
+
+Ad/Tracker Blocking:
+Use EasyList/EasyPrivacy (assets/filters/easylist.txt, easyprivacy.txt, 1-2 MB) in WebViewClient.shouldInterceptRequest (90% effective, ~5-10ms/request).
+Toggle ad blocking (default off) in Compose settings screen.
+Guide users to enable Private DNS (dns.adguard.com) via settings button (Settings.ACTION_WIRELESS_SETTINGS).
+
+
+Preloading Animation:
+Show green CircularProgressIndicator with "Checking for Profanity" text (Scheherazade font) during NSFWJS (500ms) or keyword (10ms) checks, per tab.
+
+
+Azan Blocking:
+Listen for broadcast from companion app (com.example.noorahlulbayt.BLOCK_BROWSER).
+When blocked, pause WebView (load about:blank) and show flashing message: "Browser is not available during prayer time for 10 minutes" (green, Scheherazade font).
+
+
+Multi-Tab Support:
+Max 5 tabs (~50-100 MB), recycle WebView instances.
+Use HorizontalPager (Accompanist) for tab navigation.
+
+
+Default Browser:
+Intent filters for ACTION_VIEW (http/https).
+Button to prompt Settings.ACTION_APP_OPEN_BY_DEFAULT_SETTINGS.
+
+
+Shia Features:
+Green/black UI (Color(0xFF006400), black background).
+Scheherazade font (res/font/scheherazade.xml).
+Display cached prayer times (from companion app) in settings screen.
+
+
+PIN Override:
+Dialog to unblock flagged URLs with PIN (secure, e.g., encrypted SharedPreferences).
+
+
+Reels/TikTok:
+Handle dynamic content (captions, hashtags, thumbnails) for Facebook Reels (https://www.facebook.com/reels) and TikTok (https://www.tiktok.com).
+Ensure ~90% ad blocking, NSFW filtering.
+
+
+
+
+Files:
+
+build.gradle: Include dependencies (Compose, Room, WorkManager, Accompanist Pager, Coroutines).
+BrowserActivity.kt: WebView, tabs, animation, filtering, Azan block receiver.
+BlocklistDatabase.kt: Room for blocklist (URL, isBlocked, lastChecked).
+AdBlocker.kt: Parse EasyList/EasyPrivacy, block ad/tracker requests.
+AndroidManifest.xml: Permissions (Internet, RECEIVE_BROADCAST), intent filters.
+Assets: nsfwjs/nsfwjs.min.js, nsfwjs/model/, filters/easylist.txt, filters/easyprivacy.txt.
+Resources: res/font/scheherazade.xml, res/values/strings.xml (app name: "Noor-e-AhlulBayt").
+
+
+Play Store Compliance:
+
+Ad blocking toggle (default off).
+Market as Islamic family-safe browser.
+Privacy policy: No data collection, local blocklist only.
+
+
+
+Azan Mobile Companion App Requirements
+
+Core:
+
+Package name: com.example.noorahlulbaytcompanion.
+Android Studio, Kotlin, Jetpack Compose, min SDK 21.
+
+
+Features:
+
+Block Other Browsers:
+Use Device Admin API to disable browser apps (com.android.chrome, org.mozilla.firefox, com.sec.android.app.sbrowser, com.microsoft.emmx, com.opera.browser, com.brave.browser, com.naver.whale, com.UCMobile.intl).
+Use Accessibility Service to detect browser launches, show Toast ("Use Noor-e-AhlulBayt"), redirect to browser app, minimize offending app (GLOBAL_ACTION_HOME).
+WorkManager for periodic checks (every 24 hours) to re-disable browsers.
+Toggle in settings screen (default on).
+
+
+Azan Blocking:
+Fetch prayer times daily from Aladhan API (http://api.aladhan.com/v1/timingsByCity?city=Najaf&country=Iraq&method=3).
+Use device location (LocationManager, ACCESS_FINE_LOCATION) to auto-detect city/country via Geocoder, or allow manual city selection in settings.
+Cache in Room, update via WorkManager, delete entries >30 days.
+Schedule WorkManager tasks (AzanBlockWorker) for Azan times (Fajr, Dhuhr, Asr, Maghrib, Isha).
+During Azan, disable browser app (com.example.noorahlulbayt) for 10 minutes using Device Admin or send broadcast to pause WebView tabs.
+Show flashing message in browser: "Browser is not available during prayer time for 10 minutes."
+Optional: Stream Adhan audio (https://aladhan.com/play, OkHttp).
+Toggle in settings screen (default on).
+
+
+Prayer Times:
+Display cached times (Fajr, Dhuhr, Asr, Maghrib, Isha) in settings screen.
+
+
+Settings/Preferences Screen:
+Manage:
+Azan blocking toggle (default on).
+Browser blocking toggle (default on).
+PIN setup/change (secure, encrypted SharedPreferences).
+City selection (auto via location or manual dropdown/text input).
+Private DNS guidance (dns.adguard.com button).
+
+
+Green/black UI, Scheherazade font.
+
+
+PIN Override:
+Unblock browsers or Azan restrictions with PIN.
+
+
+Play Store Compliance:
+Market as parental control app for Islamic safe browsing.
+Include toggles and PIN override to avoid "overly restrictive" flags.
+
+
+
+
+Files:
+
+build.gradle: Include dependencies (Compose, Room, WorkManager, JSON, OkHttp, Location).
+MainActivity.kt: Setup UI, settings screen, Device Admin, Accessibility, PIN dialog.
+AdminReceiver.kt: Device Admin receiver.
+BrowserBlocker.kt: Disable/re-enable browsers.
+BrowserAccessibilityService.kt: Detect browser launches, redirect.
+PrayerTimesWorker.kt: Fetch/cache prayer times, schedule Azan blocking.
+AzanBlockWorker.kt: Block browser during Azan, send broadcast.
+SettingsManager.kt: Manage settings (toggles, PIN, city).
+AppDatabase.kt: Room for prayer times (date, Fajr, Dhuhr, Asr, Maghrib, Isha).
+AndroidManifest.xml: Permissions (Internet, RECEIVE_BOOT_COMPLETED, ACCESSIBILITY_SERVICE, ACCESS_FINE_LOCATION, FOREGROUND_SERVICE), Device Admin, Accessibility Service.
+Resources: res/xml/device_admin.xml, res/xml/accessibility_service_config.xml, res/font/scheherazade.xml, res/values/strings.xml (app name: "Noor-e-AhlulBayt Companion").
+
+
+
+
+General Requirements
+
+Performance: Blocklist (10ms), NSFWJS (500ms), ads (5-10ms/request), Azan blocking (10ms), memory (~50-100 MB for 5 tabs, ~10-20 MB companion).
+Storage: ~3-6 MB total (browser ~2-4 MB, companion ~1-2 MB).
+Testing: Validate on Facebook Reels, TikTok (captions, thumbnails, ads), Chrome/Firefox blocking, Azan blocking with flashing message.
+Assets: Download NSFWJS from https://github.com/infinitered/nsfwjs, EasyList/EasyPrivacy from https://github.com/easylist/easylist, Scheherazade font from https://software.sil.org/scheherazade.
+Directory Structure:noor-e-ahlulbayt/
+├── app/
+│   ├── src/main/
+│   │   ├── java/com/example/noorahlulbayt/
+│   │   ├── assets/
+│   │   │   ├── nsfwjs/nsfwjs.min.js
+│   │   │   ├── nsfwjs/model/
+│   │   │   ├── filters/easylist.txt
+│   │   │   ├── filters/easyprivacy.txt
+│   │   ├── res/
+│   │   │   ├── font/scheherazade.xml
+│   │   │   ├── values/strings.xml
+│   │   ├── AndroidManifest.xml
+│   ├── build.gradle
+companion/
+├── app/
+│   ├── src/main/
+│   │   ├── java/com/example/noorahlulbaytcompanion/
+│   │   ├── res/
+│   │   │   ├── xml/device_admin.xml
+│   │   │   ├── xml/accessibility_service_config.xml
+│   │   │   ├── font/scheherazade.xml
+│   │   │   ├── values/strings.xml
+│   │   ├── AndroidManifest.xml
+│   ├── build.gradle
+
+
+Play Store: Submit as family-safe apps, ad blocking off, Azan blocking on, privacy policy (no data collection).
+
+Generate all files with complete, error-free code. Use modern Android practices (Coroutines, Compose, Room). Ensure compatibility with Reels/TikTok dynamic content. Provide setup instructions for assets and testing.
+
+# Requirements for NudeNet Demo App
+# .NET Framework 9 is assumed to be installed
+
+# TODO: Add Python dependencies for NudeNet if required
+# TODO: Add instructions for setting up NudeNet model
+
+# ============================================================================
+# PROJECT FEASIBILITY ASSESSMENT
+# ============================================================================
+
+# VERDICT: HIGHLY FEASIBLE WITH MODIFICATIONS
+
+# Technical Feasibility: 8/10
+# - Modern Android Architecture (Kotlin, Jetpack Compose, Room)
+# - Realistic Performance Claims (10ms keyword, 500ms NSFWJS)
+# - Appropriate Dependencies (NSFWJS 1-2MB, EasyList filters)
+# - WebView-based approach leverages Android's built-in capabilities
+
+# Anti-Porn Effectiveness: 7/10
+# - Multi-layered approach: Keyword + NSFWJS + Ad blocking
+# - Real-time analysis with 80-90% accuracy
+# - Dynamic content handling for social media
+# - Caching system reduces redundant analysis
+
+# Key Challenges to Address:
+# 1. Device Admin Permissions: Modern Android (API 30+) severely restricts device admin
+# 2. Accessibility Service Limitations: Recent Android versions limit accessibility abuse
+# 3. Play Store Compliance: Aggressive browser blocking may face rejection
+
+# Recommended Modifications:
+# 1. Focus on Core Features First:
+#    - Implement keyword filtering and NSFWJS
+#    - Add ad blocking with EasyList
+#    - Build WebView browser with tab support
+#
+# 2. Alternative to Device Admin:
+#    - Make browser the default choice through superior UX
+#    - Use parental control APIs where available
+#    - Focus on being the best family-safe browser
+#
+# 3. Enhanced Privacy Features:
+#    - Local-only processing (no data sent to servers)
+#    - Transparent privacy policy
+#    - User control over all features
+
+# Success Factors:
+# - Focus on being the best family-safe browser rather than blocking others
+# - Emphasize privacy and local processing
+# - Provide clear value proposition for families
+# - Ensure Play Store compliance through proper feature toggles
+
+# ============================================================================

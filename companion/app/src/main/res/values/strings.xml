@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Azan Mobile Browser Companion</string>
+    <string name="app_description">Companion app for Islamic family-safe browsing</string>
+    
+    <!-- Accessibility Service -->
+    <string name="accessibility_service_description">Monitors browser usage and redirects to safe browser</string>
+    
+    <!-- Settings -->
+    <string name="azan_blocking">Azan Blocking</string>
+    <string name="azan_blocking_description">Block browser during prayer times</string>
+    <string name="browser_blocking">Browser Blocking</string>
+    <string name="browser_blocking_description">Block other browsers</string>
+    <string name="prayer_times">Prayer Times</string>
+    <string name="settings">Settings</string>
+    
+    <!-- Prayer Times -->
+    <string name="fajr">Fajr</string>
+    <string name="dhuhr">Dhuhr</string>
+    <string name="asr">Asr</string>
+    <string name="maghrib">Maghrib</string>
+    <string name="isha">Isha</string>
+    
+    <!-- PIN -->
+    <string name="enter_pin">Enter PIN</string>
+    <string name="pin_hint">Enter your PIN to override</string>
+    <string name="pin_incorrect">Incorrect PIN</string>
+    <string name="pin_setup">Setup PIN</string>
+    <string name="pin_change">Change PIN</string>
+    
+    <!-- Admin -->
+    <string name="enable_device_admin">Enable Device Admin</string>
+    <string name="accessibility_settings">Accessibility Settings</string>
+    <string name="private_dns_settings">Private DNS Settings</string>
+    
+    <!-- Messages -->
+    <string name="use_safe_browser">Use Noor-e-AhlulBayt browser instead</string>
+    <string name="install_browser">Please install Noor-e-AhlulBayt browser</string>
+    <string name="prayer_time_started">Prayer time started. Browser is now blocked for 10 minutes.</string>
+    <string name="prayer_time_ended">Prayer time ended. Browser is now available.</string>
+    <string name="browser_monitoring_started">Browser monitoring service started</string>
+    <string name="device_admin_enabled">Device Admin enabled</string>
+    <string name="device_admin_disabled">Device Admin disabled</string>
+    
+    <!-- Privacy -->
+    <string name="privacy_policy">Privacy Policy</string>
+    <string name="no_data_collection">No data is collected or sent to servers. All functionality is local.</string>
+</resources> 
