@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import com.example.noorahlulbayt.utils.AppLogger
 
 class BrowserViewModel(application: Application) : AndroidViewModel(application) {
     
@@ -39,6 +40,8 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
     val history: StateFlow<List<HistoryEntry>> = _history.asStateFlow()
     
     init {
+        AppLogger.i("BrowserViewModel", "Initializing BrowserViewModel")
+        
         // Add initial tab
         addTab()
         
@@ -46,6 +49,8 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         loadFavorites()
         loadDownloads()
         loadHistory()
+        
+        AppLogger.i("BrowserViewModel", "BrowserViewModel initialization complete")
     }
     
     fun addTab() {
@@ -56,14 +61,21 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
                 title = "New Tab"
             )
             _tabs.value = _tabs.value + newTab
+            AppLogger.logTabOperation("ADDED", _tabs.value.size - 1, _tabs.value.size, newTab.url)
+        } else {
+            AppLogger.w("BrowserViewModel", "Cannot add tab - maximum limit of 5 tabs reached")
         }
     }
     
     fun closeTab(index: Int) {
         if (_tabs.value.size > 1) {
+            val tabToClose = _tabs.value.getOrNull(index)
             val updatedTabs = _tabs.value.toMutableList()
             updatedTabs.removeAt(index)
             _tabs.value = updatedTabs
+            AppLogger.logTabOperation("CLOSED", index, _tabs.value.size, tabToClose?.url ?: "unknown")
+        } else {
+            AppLogger.w("BrowserViewModel", "Cannot close tab - minimum 1 tab required")
         }
     }
     
@@ -103,6 +115,9 @@ class BrowserViewModel(application: Application) : AndroidViewModel(application)
         if (index < updatedTabs.size) {
             updatedTabs[index] = updatedTabs[index].copy(url = url)
             _tabs.value = updatedTabs
+            AppLogger.logTabOperation("NAVIGATE", index, _tabs.value.size, url)
+        } else {
+            AppLogger.w("BrowserViewModel", "Cannot navigate - invalid tab index: $index")
         }
     }
     

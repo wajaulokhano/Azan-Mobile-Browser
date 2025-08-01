@@ -14,7 +14,8 @@ import androidx.compose.ui.unit.sp
 
 @Composable
 fun SettingsScreen(
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onViewLogs: () -> Unit = {}
 ) {
     Column(
         modifier = Modifier
@@ -112,6 +113,26 @@ fun SettingsScreen(
                             description = "Use Islamic color scheme and fonts",
                             isEnabled = true,
                             onToggle = { /* TODO: Implement */ }
+                        )
+                    )
+                )
+            }
+            
+            item {
+                SettingsSection(
+                    title = "Debug & Support",
+                    items = listOf(
+                        SettingItem(
+                            title = "View Debug Logs",
+                            description = "View app logs for troubleshooting crashes",
+                            isAction = true,
+                            onAction = onViewLogs
+                        ),
+                        SettingItem(
+                            title = "Export Logs",
+                            description = "Share logs for technical support",
+                            isAction = true,
+                            onAction = { /* TODO: Implement */ }
                         )
                     )
                 )

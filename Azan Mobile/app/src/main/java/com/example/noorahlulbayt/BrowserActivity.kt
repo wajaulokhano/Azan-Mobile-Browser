@@ -11,6 +11,7 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -30,6 +31,8 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.example.noorahlulbayt.screens.*
+import com.example.noorahlulbayt.utils.AppLogger
+import com.example.noorahlulbayt.utils.PermissionHelper
 import com.google.accompanist.pager.ExperimentalPagerApi
 import com.google.accompanist.pager.HorizontalPager
 import com.google.accompanist.pager.rememberPagerState
@@ -44,12 +47,23 @@ class BrowserActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
+        AppLogger.i("BrowserActivity", "onCreate - Starting Azan Mobile Browser")
+        
+        // Request storage permissions for logging
+        if (!PermissionHelper.hasStoragePermission(this)) {
+            AppLogger.w("BrowserActivity", "Storage permission not granted, requesting...")
+            PermissionHelper.requestStoragePermission(this)
+        } else {
+            AppLogger.i("BrowserActivity", "Storage permission already granted")
+        }
+        
         browserViewModel = BrowserViewModel(application)
         
         // Register Azan block receiver
         azanBlockReceiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context?, intent: Intent?) {
                 if (intent?.action == "com.example.noorahlulbayt.BLOCK_BROWSER") {
+                    AppLogger.logPrayerTimeEvent("Browser blocking started")
                     isAzanBlocked = true
                     browserViewModel.blockAllTabs()
                     showAzanBlockMessage()
@@ -57,6 +71,7 @@ class BrowserActivity : ComponentActivity() {
             }
         }
         registerReceiver(azanBlockReceiver, IntentFilter("com.example.noorahlulbayt.BLOCK_BROWSER"))
+        AppLogger.i("BrowserActivity", "Azan block receiver registered")
 
         setContent {
             BrowserApp(
@@ -82,6 +97,7 @@ fun BrowserApp(
     isAzanBlocked: Boolean = false
 ) {
     val navController = rememberNavController()
+    var currentTabIndex by remember { mutableStateOf(0) }
     
     MaterialTheme(
         colorScheme = darkColorScheme(
@@ -104,16 +120,19 @@ fun BrowserApp(
                     onNavigateToFavorites = { navController.navigate("favorites") },
                     onNavigateToDownloads = { navController.navigate("downloads") },
                     onNavigateToHistory = { navController.navigate("history") },
-                    onNavigateToSettings = { navController.navigate("settings") }
+                    onNavigateToSettings = { navController.navigate("settings") },
+                    onCurrentTabIndexChanged = { currentTabIndex = it }
                 )
             }
             composable("favorites") {
                 FavoritesScreen(
                     browserViewModel = browserViewModel,
                     onNavigateToUrl = { url ->
-                        // Navigate back to browser and load URL
+                        // Navigate back to browser and load URL in current tab
                         navController.popBackStack()
-                        // TODO: Load URL in current tab
+                        if (currentTabIndex >= 0 && currentTabIndex < browserViewModel.tabs.value.size) {
+                            browserViewModel.navigateToUrl(currentTabIndex, url)
+                        }
                     },
                     onBack = { navController.popBackStack() }
                 )
@@ -128,15 +147,23 @@ fun BrowserApp(
                 HistoryScreen(
                     browserViewModel = browserViewModel,
                     onNavigateToUrl = { url ->
-                        // Navigate back to browser and load URL
+                        // Navigate back to browser and load URL in current tab
                         navController.popBackStack()
-                        // TODO: Load URL in current tab
+                        if (currentTabIndex >= 0 && currentTabIndex < browserViewModel.tabs.value.size) {
+                            browserViewModel.navigateToUrl(currentTabIndex, url)
+                        }
                     },
                     onBack = { navController.popBackStack() }
                 )
             }
             composable("settings") {
                 SettingsScreen(
+                    onBack = { navController.popBackStack() },
+                    onViewLogs = { navController.navigate("logs") }
+                )
+            }
+            composable("logs") {
+                LogViewerScreen(
                     onBack = { navController.popBackStack() }
                 )
             }
@@ -152,11 +179,17 @@ fun BrowserScreen(
     onNavigateToFavorites: () -> Unit = {},
     onNavigateToDownloads: () -> Unit = {},
     onNavigateToHistory: () -> Unit = {},
-    onNavigateToSettings: () -> Unit = {}
+    onNavigateToSettings: () -> Unit = {},
+    onCurrentTabIndexChanged: (Int) -> Unit = {}
 ) {
     val context = LocalContext.current
     val pagerState = rememberPagerState()
     val coroutineScope = rememberCoroutineScope()
+    
+    // Track current tab index and notify parent
+    LaunchedEffect(pagerState.currentPage) {
+        onCurrentTabIndexChanged(pagerState.currentPage)
+    }
 
     Column(
         modifier = Modifier
@@ -178,18 +211,32 @@ fun BrowserScreen(
 
         // Tab Bar
         val tabs by browserViewModel.tabs.collectAsState()
-        TabBar(
-            tabs = tabs,
-            currentTabIndex = pagerState.currentPage,
-            onTabClick = { index ->
-                coroutineScope.launch {
-                    pagerState.animateScrollToPage(index)
+        if (tabs.isNotEmpty()) {
+            TabBar(
+                tabs = tabs,
+                currentTabIndex = pagerState.currentPage,
+                onTabClick = { index ->
+                    AppLogger.d("TabBar", "Tab clicked: $index")
+                    coroutineScope.launch {
+                        try {
+                            pagerState.animateScrollToPage(index)
+                            AppLogger.d("TabBar", "Successfully switched to tab: $index")
+                        } catch (e: Exception) {
+                            AppLogger.e("TabBar", "Failed to switch to tab: $index", e)
+                        }
+                    }
+                },
+                onTabClose = { index ->
+                    AppLogger.d("TabBar", "Close tab clicked: $index")
+                    try {
+                        browserViewModel.closeTab(index)
+                        AppLogger.d("TabBar", "Successfully closed tab: $index")
+                    } catch (e: Exception) {
+                        AppLogger.e("TabBar", "Failed to close tab: $index", e)
+                    }
                 }
-            },
-            onTabClose = { index ->
-                browserViewModel.closeTab(index)
-            }
-        )
+            )
+        }
 
         // WebView Pager
         HorizontalPager(
@@ -267,21 +314,30 @@ fun TabBar(
         modifier = Modifier
             .fillMaxWidth()
             .background(Color(0xFF1A1A1A))
-            .padding(8.dp),
-        horizontalArrangement = Arrangement.spacedBy(4.dp)
+            .padding(horizontal = 8.dp, vertical = 4.dp)
+            .height(40.dp), // Fixed height for mobile
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
         items(tabs.size) { index ->
             val tab = tabs[index]
             TabItem(
                 tab = tab,
                 isSelected = index == currentTabIndex,
-                onClick = { onTabClick(index) },
-                onClose = { onTabClose(index) }
+                onClick = { 
+                    AppLogger.logTabOperation("CLICKED", index, tabs.size, tab.url)
+                    onTabClick(index) 
+                },
+                onClose = { 
+                    AppLogger.logTabOperation("CLOSE_CLICKED", index, tabs.size, tab.url)
+                    onTabClose(index) 
+                }
             )
         }
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TabItem(
     tab: BrowserTab,
@@ -291,20 +347,47 @@ fun TabItem(
 ) {
     val backgroundColor = if (isSelected) Color(0xFF006400) else Color(0xFF333333)
     
-    Row(
+    Card(
         modifier = Modifier
-            .background(backgroundColor)
-            .padding(8.dp),
-        verticalAlignment = Alignment.CenterVertically
+            .widthIn(min = 120.dp, max = 200.dp)
+            .height(32.dp),
+        colors = CardDefaults.cardColors(containerColor = backgroundColor),
+        onClick = onClick
     ) {
-        Text(
-            text = tab.title.ifEmpty { "New Tab" },
-            color = Color.White,
-            fontSize = 12.sp,
-            modifier = Modifier.weight(1f)
-        )
-        IconButton(onClick = onClose) {
-            Text("×", color = Color.White, fontSize = 16.sp)
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 8.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                text = tab.title.ifEmpty { "New Tab" },
+                color = Color.White,
+                fontSize = 11.sp,
+                maxLines = 1,
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(end = 4.dp)
+            )
+            
+            // Close button
+            Box(
+                modifier = Modifier
+                    .size(20.dp)
+                    .background(
+                        color = Color.White.copy(alpha = 0.2f),
+                        shape = androidx.compose.foundation.shape.CircleShape
+                    )
+                    .clickable { onClose() },
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "×",
+                    color = Color.White,
+                    fontSize = 12.sp
+                )
+            }
         }
     }
 }
@@ -338,6 +421,7 @@ fun WebViewTab(
                         webViewClient = object : WebViewClient() {
                             override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                                 super.onPageStarted(view, url, favicon)
+                                AppLogger.d("WebView", "Page started loading: $url")
                                 isLoading = true
                                 showFilteringAnimation = true
                                 
@@ -349,9 +433,23 @@ fun WebViewTab(
                             
                             override fun onPageFinished(view: WebView?, url: String?) {
                                 super.onPageFinished(view, url)
+                                AppLogger.d("WebView", "Page finished loading: $url")
                                 isLoading = false
                                 showFilteringAnimation = false
                                 onUrlChanged(url ?: "")
+                            }
+                            
+                            override fun onReceivedError(
+                                view: WebView?,
+                                request: WebResourceRequest?,
+                                error: WebResourceError?
+                            ) {
+                                super.onReceivedError(view, request, error)
+                                AppLogger.logWebViewError(
+                                    url = request?.url?.toString() ?: "unknown",
+                                    error = error?.description?.toString() ?: "unknown error",
+                                    errorCode = error?.errorCode ?: -1
+                                )
                             }
                             
                             override fun shouldInterceptRequest(
@@ -452,6 +550,8 @@ fun AzanBlockScreen() {
 }
 
 private fun performFiltering(webView: WebView, url: String) {
+    AppLogger.d("ContentFilter", "Starting content filtering for URL: $url")
+    
     // Keyword filtering
     webView.evaluateJavascript("""
         (function() {
@@ -461,29 +561,41 @@ private fun performFiltering(webView: WebView, url: String) {
             
             for (var i = 0; i < keywords.length; i++) {
                 if (text.toLowerCase().indexOf(keywords[i]) !== -1) {
-                    return true;
+                    return JSON.stringify({blocked: true, reason: 'keyword: ' + keywords[i]});
                 }
             }
             
             if (regex.test(text)) {
-                return true;
+                return JSON.stringify({blocked: true, reason: 'regex match'});
             }
             
-            return false;
+            return JSON.stringify({blocked: false, reason: 'clean content'});
         })();
     """.trimIndent()) { result ->
-        if (result == "true") {
-            webView.loadUrl("about:blank")
-            // TODO: Add to blocklist
+        try {
+            if (result.contains("\"blocked\":true")) {
+                AppLogger.logFilteringResult(url, true, "Keyword filtering - $result")
+                webView.loadUrl("about:blank")
+            } else {
+                AppLogger.logFilteringResult(url, false, "Keyword filtering passed")
+            }
+        } catch (e: Exception) {
+            AppLogger.e("ContentFilter", "Error processing keyword filter result", e)
         }
     }
     
     // NSFWJS filtering (simplified for demo)
     // In real implementation, capture screenshot and analyze with NSFWJS
     webView.postDelayed({
-        // Simulate NSFWJS analysis
-        if (url.contains("porn") || url.contains("adult")) {
-            webView.loadUrl("about:blank")
+        try {
+            if (url.contains("porn") || url.contains("adult")) {
+                AppLogger.logFilteringResult(url, true, "URL-based filtering - suspicious URL pattern")
+                webView.loadUrl("about:blank")
+            } else {
+                AppLogger.logFilteringResult(url, false, "URL-based filtering passed")
+            }
+        } catch (e: Exception) {
+            AppLogger.e("ContentFilter", "Error in URL-based filtering", e)
         }
     }, 500)
 }
