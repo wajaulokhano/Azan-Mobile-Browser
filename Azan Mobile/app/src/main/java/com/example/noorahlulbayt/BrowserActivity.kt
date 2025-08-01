@@ -26,6 +26,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
+import com.example.noorahlulbayt.screens.*
 import com.google.accompanist.pager.ExperimentalPagerApi
 import com.google.accompanist.pager.HorizontalPager
 import com.google.accompanist.pager.rememberPagerState
@@ -55,7 +59,7 @@ class BrowserActivity : ComponentActivity() {
         registerReceiver(azanBlockReceiver, IntentFilter("com.example.noorahlulbayt.BLOCK_BROWSER"))
 
         setContent {
-            BrowserScreen(
+            BrowserApp(
                 browserViewModel = browserViewModel,
                 isAzanBlocked = isAzanBlocked
             )
@@ -72,16 +76,13 @@ class BrowserActivity : ComponentActivity() {
     }
 }
 
-@OptIn(ExperimentalPagerApi::class)
 @Composable
-fun BrowserScreen(
+fun BrowserApp(
     browserViewModel: BrowserViewModel = viewModel(),
     isAzanBlocked: Boolean = false
 ) {
-    val context = LocalContext.current
-    val pagerState = rememberPagerState()
-    val coroutineScope = rememberCoroutineScope()
-
+    val navController = rememberNavController()
+    
     MaterialTheme(
         colorScheme = darkColorScheme(
             primary = Color(0xFF006400), // Green
@@ -92,53 +93,117 @@ fun BrowserScreen(
             onSurface = Color.White
         )
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color.Black)
+        NavHost(
+            navController = navController,
+            startDestination = "browser"
         ) {
-            // Top Bar
-            TopBar(
-                onNewTab = { browserViewModel.addTab() },
-                onSettings = { /* TODO: Navigate to settings */ },
-                onSetDefault = {
-                    val intent = Intent(android.provider.Settings.ACTION_APP_OPEN_BY_DEFAULT_SETTINGS)
-                    context.startActivity(intent)
-                },
-                onFavorites = { /* TODO: Show favorites */ },
-                onDownloads = { /* TODO: Show downloads */ },
-                onHistory = { /* TODO: Show history */ }
-            )
+            composable("browser") {
+                BrowserScreen(
+                    browserViewModel = browserViewModel,
+                    isAzanBlocked = isAzanBlocked,
+                    onNavigateToFavorites = { navController.navigate("favorites") },
+                    onNavigateToDownloads = { navController.navigate("downloads") },
+                    onNavigateToHistory = { navController.navigate("history") },
+                    onNavigateToSettings = { navController.navigate("settings") }
+                )
+            }
+            composable("favorites") {
+                FavoritesScreen(
+                    browserViewModel = browserViewModel,
+                    onNavigateToUrl = { url ->
+                        // Navigate back to browser and load URL
+                        navController.popBackStack()
+                        // TODO: Load URL in current tab
+                    },
+                    onBack = { navController.popBackStack() }
+                )
+            }
+            composable("downloads") {
+                DownloadsScreen(
+                    browserViewModel = browserViewModel,
+                    onBack = { navController.popBackStack() }
+                )
+            }
+            composable("history") {
+                HistoryScreen(
+                    browserViewModel = browserViewModel,
+                    onNavigateToUrl = { url ->
+                        // Navigate back to browser and load URL
+                        navController.popBackStack()
+                        // TODO: Load URL in current tab
+                    },
+                    onBack = { navController.popBackStack() }
+                )
+            }
+            composable("settings") {
+                SettingsScreen(
+                    onBack = { navController.popBackStack() }
+                )
+            }
+        }
+    }
+}
 
-            // Tab Bar
-            val tabs by browserViewModel.tabs.collectAsState()
-            TabBar(
-                tabs = tabs,
-                currentTabIndex = pagerState.currentPage,
-                onTabClick = { index ->
-                    coroutineScope.launch {
-                        pagerState.animateScrollToPage(index)
-                    }
-                },
-                onTabClose = { index ->
-                    browserViewModel.closeTab(index)
-                }
-            )
+@OptIn(ExperimentalPagerApi::class)
+@Composable
+fun BrowserScreen(
+    browserViewModel: BrowserViewModel = viewModel(),
+    isAzanBlocked: Boolean = false,
+    onNavigateToFavorites: () -> Unit = {},
+    onNavigateToDownloads: () -> Unit = {},
+    onNavigateToHistory: () -> Unit = {},
+    onNavigateToSettings: () -> Unit = {}
+) {
+    val context = LocalContext.current
+    val pagerState = rememberPagerState()
+    val coroutineScope = rememberCoroutineScope()
 
-            // WebView Pager
-            HorizontalPager(
-                count = tabs.size,
-                state = pagerState
-            ) { page ->
-                if (page < tabs.size) {
-                    val tab = tabs[page]
-                    WebViewTab(
-                        tab = tab,
-                        isAzanBlocked = isAzanBlocked,
-                        onUrlChanged = { url -> browserViewModel.updateTabUrl(page, url) },
-                        onTitleChanged = { title -> browserViewModel.updateTabTitle(page, title) }
-                    )
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black)
+    ) {
+        // Top Bar
+        TopBar(
+            onNewTab = { browserViewModel.addTab() },
+            onSettings = onNavigateToSettings,
+            onSetDefault = {
+                val intent = Intent(android.provider.Settings.ACTION_APP_OPEN_BY_DEFAULT_SETTINGS)
+                context.startActivity(intent)
+            },
+            onFavorites = onNavigateToFavorites,
+            onDownloads = onNavigateToDownloads,
+            onHistory = onNavigateToHistory
+        )
+
+        // Tab Bar
+        val tabs by browserViewModel.tabs.collectAsState()
+        TabBar(
+            tabs = tabs,
+            currentTabIndex = pagerState.currentPage,
+            onTabClick = { index ->
+                coroutineScope.launch {
+                    pagerState.animateScrollToPage(index)
                 }
+            },
+            onTabClose = { index ->
+                browserViewModel.closeTab(index)
+            }
+        )
+
+        // WebView Pager
+        HorizontalPager(
+            count = tabs.size,
+            state = pagerState
+        ) { page ->
+            if (page < tabs.size) {
+                val tab = tabs[page]
+                WebViewTab(
+                    tab = tab,
+                    isAzanBlocked = isAzanBlocked,
+                    onUrlChanged = { url -> browserViewModel.updateTabUrl(page, url) },
+                    onTitleChanged = { title -> browserViewModel.updateTabTitle(page, title) }
+                )
             }
         }
     }
@@ -161,12 +226,12 @@ fun TopBar(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-                    Text(
-                text = "Azan Mobile Browser",
-                color = Color.White,
-                fontSize = 18.sp,
-                fontFamily = FontFamily.Default
-            )
+        Text(
+            text = "Azan Mobile Browser",
+            color = Color.White,
+            fontSize = 18.sp,
+            fontFamily = FontFamily.Default
+        )
         
         Row {
             IconButton(onClick = onFavorites) {
@@ -421,4 +486,4 @@ private fun performFiltering(webView: WebView, url: String) {
             webView.loadUrl("about:blank")
         }
     }, 500)
-} 
+}

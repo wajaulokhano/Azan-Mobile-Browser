@@ -109,7 +109,4 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     }
 }
 
-data class PrayerTime(
-    val name: String,
-    val time: String
-) 
+// PrayerTime data class moved to MainActivity.kt to avoid duplication 

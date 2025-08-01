@@ -114,13 +114,13 @@ fun CompanionAppScreen(
                             SettingItem(
                                 title = "Azan Blocking",
                                 description = "Block browser during prayer times",
-                                isEnabled = settingsViewModel.azanBlockingEnabled,
+                                isEnabled = settingsViewModel.azanBlockingEnabled.collectAsState().value,
                                 onToggle = { settingsViewModel.setAzanBlocking(it) }
                             ),
                             SettingItem(
                                 title = "Browser Blocking",
                                 description = "Block other browsers",
-                                isEnabled = settingsViewModel.browserBlockingEnabled,
+                                isEnabled = settingsViewModel.browserBlockingEnabled.collectAsState().value,
                                 onToggle = { settingsViewModel.setBrowserBlocking(it) }
                             )
                         )
@@ -130,7 +130,7 @@ fun CompanionAppScreen(
                 // Prayer Times Section
                 item {
                     PrayerTimesSection(
-                        prayerTimes = settingsViewModel.prayerTimes,
+                        prayerTimes = settingsViewModel.prayerTimes.collectAsState().value,
                         onRefresh = { settingsViewModel.refreshPrayerTimes() }
                     )
                 }

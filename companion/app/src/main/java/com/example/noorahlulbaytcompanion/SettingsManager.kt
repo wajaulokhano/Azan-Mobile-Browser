@@ -7,6 +7,7 @@ import androidx.datastore.preferences.preferencesDataStore
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "settings")
@@ -57,25 +58,25 @@ class SettingsManager(private val context: Context) {
         }
     }
     
-    fun isAzanBlockingEnabled(): Boolean {
+    suspend fun isAzanBlockingEnabled(): Boolean {
         return context.dataStore.data.map { preferences ->
             preferences[AZAN_BLOCKING] ?: true
         }.first()
     }
     
-    fun isBrowserBlockingEnabled(): Boolean {
+    suspend fun isBrowserBlockingEnabled(): Boolean {
         return context.dataStore.data.map { preferences ->
             preferences[BROWSER_BLOCKING] ?: true
         }.first()
     }
     
-    fun getCity(): String {
+    suspend fun getCity(): String {
         return context.dataStore.data.map { preferences ->
             preferences[CITY] ?: "Najaf"
         }.first()
     }
     
-    fun getCountry(): String {
+    suspend fun getCountry(): String {
         return context.dataStore.data.map { preferences ->
             preferences[COUNTRY] ?: "Iraq"
         }.first()
