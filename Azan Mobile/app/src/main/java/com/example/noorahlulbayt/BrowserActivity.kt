@@ -38,11 +38,15 @@ import com.google.accompanist.pager.HorizontalPager
 import com.google.accompanist.pager.rememberPagerState
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 
 class BrowserActivity : ComponentActivity() {
     private lateinit var browserViewModel: BrowserViewModel
     private lateinit var azanBlockReceiver: BroadcastReceiver
     private var isAzanBlocked = false
+    private lateinit var nsfwjsFilterManager: NSFWJSFilterManager
+    private lateinit var filteringSettingsManager: FilteringSettingsManager
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -58,6 +62,9 @@ class BrowserActivity : ComponentActivity() {
         }
         
         browserViewModel = BrowserViewModel(application)
+        
+        // Initialize advanced filtering system
+        initializeFiltering()
         
         // Register Azan block receiver
         azanBlockReceiver = object : BroadcastReceiver() {
@@ -85,9 +92,115 @@ class BrowserActivity : ComponentActivity() {
         Toast.makeText(this, "Browser is not available during prayer time for 10 minutes", Toast.LENGTH_LONG).show()
     }
 
+    private fun initializeFiltering() {
+        AppLogger.i("BrowserActivity", "Initializing advanced filtering system")
+        
+        filteringSettingsManager = FilteringSettingsManager(this)
+        nsfwjsFilterManager = NSFWJSFilterManager(this).apply {
+            filteringMode = filteringSettingsManager.filteringMode
+            allowBlobImages = filteringSettingsManager.allowBlobImages
+            allowBase64Images = filteringSettingsManager.allowBase64Images
+        }
+        
+        // Initialize NSFWJS in background
+        CoroutineScope(Dispatchers.Main).launch {
+            try {
+                nsfwjsFilterManager.initialize()
+                AppLogger.i("BrowserActivity", "NSFWJS filtering system initialized")
+            } catch (e: Exception) {
+                AppLogger.e("BrowserActivity", "Failed to initialize NSFWJS filtering", e)
+            }
+        }
+    }
+
+    private fun performFiltering(webView: WebView, url: String) {
+        AppLogger.d("ContentFilter", "Starting advanced content filtering for URL: $url")
+        
+        // 1. Quick offline filtering first (for immediate blocking)
+        val urlResult = OfflineContentFilter.shouldBlockUrl(url)
+        if (urlResult.blocked) {
+            val blockedHtml = OfflineContentFilter.createBlockedPageHtml(urlResult.reason)
+            webView.loadDataWithBaseURL(null, blockedHtml, "text/html", "UTF-8", null)
+            return
+        }
+        
+        // 2. Enhanced post-load filtering with NSFWJS
+        webView.postDelayed({
+            // First do offline content analysis
+            OfflineContentFilter.analyzePageContent(webView, url) { offlineResult ->
+                if (offlineResult.blocked) {
+                    AppLogger.i("ContentFilter", "Content blocked by offline analysis: ${offlineResult.reason}")
+                    val blockedHtml = OfflineContentFilter.createBlockedPageHtml(offlineResult.reason)
+                    webView.loadDataWithBaseURL(null, blockedHtml, "text/html", "UTF-8", null)
+                } else {
+                    // If offline analysis passes, run NSFWJS for visual content
+                    if (filteringSettingsManager.nsfwjsEnabled) {
+                        nsfwjsFilterManager.performPostLoadFiltering(webView, url)
+                    }
+                }
+            }
+        }, 1500) // Wait for page to load
+    }
+
+    private fun injectNSFWJS(webView: WebView, onComplete: () -> Unit) {
+        AppLogger.d("NSFWJS", "Injecting NSFWJS library into WebView")
+        
+        try {
+            // Read NSFWJS JavaScript from assets
+            val context = webView.context
+            val nsfwjsScript = context.assets.open("nsfwjs/nsfwjs.min.js").bufferedReader().use { it.readText() }
+            
+            // Inject the NSFWJS library
+            webView.evaluateJavascript("""
+                (function() {
+                    try {
+                        // Inject NSFWJS script
+                        $nsfwjsScript
+                        
+                        // Verify NSFWJS is loaded
+                        if (typeof nsfwjs !== 'undefined') {
+                            console.log('NSFWJS loaded successfully');
+                            return JSON.stringify({success: true, message: 'NSFWJS loaded'});
+                        } else {
+                            console.log('NSFWJS failed to load');
+                            return JSON.stringify({success: false, message: 'NSFWJS not available'});
+                        }
+                    } catch (e) {
+                        console.log('Error loading NSFWJS: ' + e.message);
+                        return JSON.stringify({success: false, message: 'Error: ' + e.message});
+                    }
+                })();
+            """.trimIndent()) { result ->
+                try {
+                    AppLogger.d("NSFWJS", "Injection result: $result")
+                    if (result.contains("\"success\":true")) {
+                        AppLogger.i("NSFWJS", "NSFWJS library loaded successfully")
+                    } else {
+                        AppLogger.w("NSFWJS", "NSFWJS library failed to load: $result")
+                    }
+                } catch (e: Exception) {
+                    AppLogger.e("NSFWJS", "Error processing injection result", e)
+                }
+                
+                // Continue with filtering regardless of NSFWJS status
+                onComplete()
+            }
+            
+        } catch (e: Exception) {
+            AppLogger.e("NSFWJS", "Failed to read NSFWJS script from assets", e)
+            // Continue with filtering even if NSFWJS fails to load
+            onComplete()
+        }
+    }
+
     override fun onDestroy() {
         super.onDestroy()
         unregisterReceiver(azanBlockReceiver)
+        
+        // Cleanup NSFWJS resources
+        if (::nsfwjsFilterManager.isInitialized) {
+            nsfwjsFilterManager.cleanup()
+        }
     }
 }
 
@@ -159,7 +272,8 @@ fun BrowserApp(
             composable("settings") {
                 SettingsScreen(
                     onBack = { navController.popBackStack() },
-                    onViewLogs = { navController.navigate("logs") }
+                    onViewLogs = { navController.navigate("logs") },
+                    onViewHistory = { navController.navigate("history") }
                 )
             }
             composable("logs") {
@@ -186,6 +300,9 @@ fun BrowserScreen(
     val pagerState = rememberPagerState()
     val coroutineScope = rememberCoroutineScope()
     
+    // Store WebView references for navigation
+    val webViewRefs = remember { mutableMapOf<Int, WebView>() }
+    
     // Track current tab index and notify parent
     LaunchedEffect(pagerState.currentPage) {
         onCurrentTabIndexChanged(pagerState.currentPage)
@@ -200,13 +317,8 @@ fun BrowserScreen(
         TopBar(
             onNewTab = { browserViewModel.addTab() },
             onSettings = onNavigateToSettings,
-            onSetDefault = {
-                val intent = Intent(android.provider.Settings.ACTION_APP_OPEN_BY_DEFAULT_SETTINGS)
-                context.startActivity(intent)
-            },
             onFavorites = onNavigateToFavorites,
-            onDownloads = onNavigateToDownloads,
-            onHistory = onNavigateToHistory
+            onDownloads = onNavigateToDownloads
         )
 
         // Tab Bar
@@ -236,6 +348,33 @@ fun BrowserScreen(
                     }
                 }
             )
+            
+            // Navigation Controls Bar
+            NavigationBar(
+                currentTab = tabs.getOrNull(pagerState.currentPage),
+                onBack = { 
+                    val currentWebView = webViewRefs[pagerState.currentPage]
+                    if (currentWebView?.canGoBack() == true) {
+                        currentWebView.goBack()
+                        AppLogger.d("Navigation", "WebView back navigation executed")
+                    } else {
+                        AppLogger.d("Navigation", "WebView cannot go back")
+                    }
+                },
+                onRefresh = { 
+                    val currentWebView = webViewRefs[pagerState.currentPage]
+                    currentWebView?.reload()
+                    AppLogger.d("Navigation", "WebView refresh executed")
+                },
+                onAddToFavorites = { 
+                    val currentTab = tabs.getOrNull(pagerState.currentPage)
+                    currentTab?.let { tab ->
+                        browserViewModel.addFavorite(tab.url, tab.title)
+                        AppLogger.d("Navigation", "Added to favorites: ${tab.url}")
+                    }
+                },
+                onHistory = onNavigateToHistory
+            )
         }
 
         // WebView Pager
@@ -249,7 +388,11 @@ fun BrowserScreen(
                     tab = tab,
                     isAzanBlocked = isAzanBlocked,
                     onUrlChanged = { url -> browserViewModel.updateTabUrl(page, url) },
-                    onTitleChanged = { title -> browserViewModel.updateTabTitle(page, title) }
+                    onTitleChanged = { title -> browserViewModel.updateTabTitle(page, title) },
+                    onWebViewReady = { webView -> 
+                        webViewRefs[page] = webView
+                        AppLogger.d("WebView", "WebView reference stored for tab $page")
+                    }
                 )
             }
         }
@@ -260,44 +403,51 @@ fun BrowserScreen(
 fun TopBar(
     onNewTab: () -> Unit,
     onSettings: () -> Unit,
-    onSetDefault: () -> Unit,
     onFavorites: () -> Unit,
-    onDownloads: () -> Unit,
-    onHistory: () -> Unit
+    onDownloads: () -> Unit
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .background(Color(0xFF006400))
-            .padding(16.dp),
+            .padding(horizontal = 16.dp, vertical = 12.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
             text = "Azan Mobile Browser",
             color = Color.White,
-            fontSize = 18.sp,
-            fontFamily = FontFamily.Default
+            fontSize = 16.sp,
+            fontFamily = FontFamily.Default,
+            modifier = Modifier.weight(1f)
         )
         
-        Row {
-            IconButton(onClick = onFavorites) {
-                Text("⭐", color = Color.White, fontSize = 20.sp)
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            IconButton(
+                onClick = onFavorites,
+                modifier = Modifier.size(36.dp)
+            ) {
+                Text("⭐", color = Color.White, fontSize = 16.sp)
             }
-            IconButton(onClick = onDownloads) {
-                Text("⬇", color = Color.White, fontSize = 20.sp)
+            IconButton(
+                onClick = onDownloads,
+                modifier = Modifier.size(36.dp)
+            ) {
+                Text("⬇", color = Color.White, fontSize = 16.sp)
             }
-            IconButton(onClick = onHistory) {
-                Text("📚", color = Color.White, fontSize = 20.sp)
+            IconButton(
+                onClick = onNewTab,
+                modifier = Modifier.size(36.dp)
+            ) {
+                Text("+", color = Color.White, fontSize = 18.sp)
             }
-            IconButton(onClick = onNewTab) {
-                Text("+", color = Color.White, fontSize = 20.sp)
-            }
-            IconButton(onClick = onSettings) {
-                Text("⚙", color = Color.White, fontSize = 20.sp)
-            }
-            IconButton(onClick = onSetDefault) {
-                Text("🌐", color = Color.White, fontSize = 20.sp)
+            IconButton(
+                onClick = onSettings,
+                modifier = Modifier.size(36.dp)
+            ) {
+                Text("⚙", color = Color.White, fontSize = 16.sp)
             }
         }
     }
@@ -398,10 +548,12 @@ fun WebViewTab(
     isAzanBlocked: Boolean,
     onUrlChanged: (String) -> Unit,
     onTitleChanged: (String) -> Unit,
-    browserViewModel: BrowserViewModel = viewModel()
+    browserViewModel: BrowserViewModel = viewModel(),
+    onWebViewReady: (WebView) -> Unit = {}
 ) {
     var isLoading by remember { mutableStateOf(false) }
     var showFilteringAnimation by remember { mutableStateOf(false) }
+    var webView by remember { mutableStateOf<WebView?>(null) }
     
     if (isAzanBlocked) {
         AzanBlockScreen()
@@ -410,6 +562,9 @@ fun WebViewTab(
             AndroidView(
                 factory = { context ->
                     WebView(context).apply {
+                        webView = this
+                        onWebViewReady(this)
+                        
                         settings.apply {
                             javaScriptEnabled = true
                             domStorageEnabled = true
@@ -427,7 +582,12 @@ fun WebViewTab(
                                 
                                 // Start filtering
                                 view?.post {
-                                    performFiltering(view, url ?: "")
+                                    // Use offline filtering for now
+                                    val urlResult = OfflineContentFilter.shouldBlockUrl(url ?: "")
+                                    if (urlResult.blocked) {
+                                        val blockedHtml = OfflineContentFilter.createBlockedPageHtml(urlResult.reason)
+                                        view.loadDataWithBaseURL(null, blockedHtml, "text/html", "UTF-8", null)
+                                    }
                                 }
                             }
                             
@@ -524,6 +684,67 @@ fun WebViewTab(
 }
 
 @Composable
+fun NavigationBar(
+    currentTab: BrowserTab?,
+    onBack: () -> Unit,
+    onRefresh: () -> Unit,
+    onAddToFavorites: () -> Unit,
+    onHistory: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color(0xFF2A2A2A))
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.SpaceEvenly,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // Back button
+        IconButton(
+            onClick = onBack,
+            modifier = Modifier.size(40.dp)
+        ) {
+            Text("←", color = Color.White, fontSize = 20.sp)
+        }
+        
+        // Refresh button
+        IconButton(
+            onClick = onRefresh,
+            modifier = Modifier.size(40.dp)
+        ) {
+            Text("🔄", color = Color.White, fontSize = 16.sp)
+        }
+        
+        // Add to favorites button
+        IconButton(
+            onClick = onAddToFavorites,
+            modifier = Modifier.size(40.dp)
+        ) {
+            Text("⭐", color = Color.White, fontSize = 16.sp)
+        }
+        
+        // History button
+        IconButton(
+            onClick = onHistory,
+            modifier = Modifier.size(40.dp)
+        ) {
+            Text("📚", color = Color.White, fontSize = 16.sp)
+        }
+        
+        // URL display (truncated)
+        Text(
+            text = currentTab?.url?.let { url ->
+                if (url.length > 30) "${url.take(30)}..." else url
+            } ?: "No URL",
+            color = Color.Gray,
+            fontSize = 10.sp,
+            modifier = Modifier.weight(1f),
+            maxLines = 1
+        )
+    }
+}
+
+@Composable
 fun AzanBlockScreen() {
     Box(
         modifier = Modifier
@@ -549,53 +770,3 @@ fun AzanBlockScreen() {
     }
 }
 
-private fun performFiltering(webView: WebView, url: String) {
-    AppLogger.d("ContentFilter", "Starting content filtering for URL: $url")
-    
-    // Keyword filtering
-    webView.evaluateJavascript("""
-        (function() {
-            var text = document.body ? document.body.innerText : '';
-            var keywords = ['nude', 'adult', 'explicit', 'porn', 'sex', 'xxx'];
-            var regex = /\\b(nudity|pornography|erotic)\\b/i;
-            
-            for (var i = 0; i < keywords.length; i++) {
-                if (text.toLowerCase().indexOf(keywords[i]) !== -1) {
-                    return JSON.stringify({blocked: true, reason: 'keyword: ' + keywords[i]});
-                }
-            }
-            
-            if (regex.test(text)) {
-                return JSON.stringify({blocked: true, reason: 'regex match'});
-            }
-            
-            return JSON.stringify({blocked: false, reason: 'clean content'});
-        })();
-    """.trimIndent()) { result ->
-        try {
-            if (result.contains("\"blocked\":true")) {
-                AppLogger.logFilteringResult(url, true, "Keyword filtering - $result")
-                webView.loadUrl("about:blank")
-            } else {
-                AppLogger.logFilteringResult(url, false, "Keyword filtering passed")
-            }
-        } catch (e: Exception) {
-            AppLogger.e("ContentFilter", "Error processing keyword filter result", e)
-        }
-    }
-    
-    // NSFWJS filtering (simplified for demo)
-    // In real implementation, capture screenshot and analyze with NSFWJS
-    webView.postDelayed({
-        try {
-            if (url.contains("porn") || url.contains("adult")) {
-                AppLogger.logFilteringResult(url, true, "URL-based filtering - suspicious URL pattern")
-                webView.loadUrl("about:blank")
-            } else {
-                AppLogger.logFilteringResult(url, false, "URL-based filtering passed")
-            }
-        } catch (e: Exception) {
-            AppLogger.e("ContentFilter", "Error in URL-based filtering", e)
-        }
-    }, 500)
-}

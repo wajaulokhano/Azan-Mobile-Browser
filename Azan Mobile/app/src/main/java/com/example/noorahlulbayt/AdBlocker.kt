@@ -1,155 +1,86 @@
 package com.example.noorahlulbayt
 
-import android.content.Context
-import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
-import java.io.BufferedReader
-import java.io.InputStreamReader
-import java.net.URL
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import com.example.noorahlulbayt.utils.AppLogger
+import java.io.ByteArrayInputStream
 
 object AdBlocker {
-    private var adBlockingEnabled = false
-    private val blockedDomains = mutableSetOf<String>()
-    private val blockedPatterns = mutableListOf<Regex>()
     
-    fun initialize(context: Context) {
-        loadAdBlockingRules(context)
-    }
+    private val blockedDomains = setOf(
+        "doubleclick.net",
+        "googleadservices.com",
+        "googlesyndication.com",
+        "googletagmanager.com",
+        "google-analytics.com",
+        "facebook.com/tr",
+        "connect.facebook.net",
+        "ads.yahoo.com",
+        "advertising.com",
+        "adsystem.com",
+        "adsense.com",
+        "amazon-adsystem.com",
+        "outbrain.com",
+        "taboola.com",
+        "criteo.com",
+        "adsafeprotected.com"
+    )
     
-    fun setAdBlockingEnabled(enabled: Boolean) {
-        adBlockingEnabled = enabled
-    }
+    private val blockedPatterns = listOf(
+        "/ads/",
+        "/advertisement/",
+        "/advertising/",
+        "/adsense/",
+        "/adnxs/",
+        "/doubleclick/",
+        "/googleads/",
+        "/googlesyndication/",
+        "/amazon-adsystem/",
+        "ads.js",
+        "analytics.js",
+        "gtag.js",
+        "fbevents.js"
+    )
     
     fun shouldBlock(url: String): WebResourceResponse? {
-        if (!adBlockingEnabled || url.isEmpty()) {
-            return null
-        }
+        if (url.isEmpty()) return null
         
         try {
-            val uri = java.net.URI(url)
-            val domain = uri.host ?: return null
+            val lowerUrl = url.lowercase()
             
             // Check blocked domains
-            if (blockedDomains.contains(domain)) {
-                return createEmptyResponse()
+            for (domain in blockedDomains) {
+                if (lowerUrl.contains(domain)) {
+                    AppLogger.d("AdBlocker", "Blocked domain: $domain in $url")
+                    return createBlockedResponse()
+                }
             }
             
             // Check blocked patterns
             for (pattern in blockedPatterns) {
-                if (pattern.containsMatchIn(url)) {
-                    return createEmptyResponse()
+                if (lowerUrl.contains(pattern)) {
+                    AppLogger.d("AdBlocker", "Blocked pattern: $pattern in $url")
+                    return createBlockedResponse()
                 }
             }
             
-            // Check for common ad indicators in URL
-            val adKeywords = listOf(
-                "ads", "ad", "advertisement", "banner", "tracker", "analytics",
-                "doubleclick", "googleadservices", "googlesyndication",
-                "facebook.com/tr", "facebook.com/audience", "facebook.com/events"
-            )
-            
-            for (keyword in adKeywords) {
-                if (url.contains(keyword, ignoreCase = true)) {
-                    return createEmptyResponse()
-                }
-            }
+            // Not blocked
+            return null
             
         } catch (e: Exception) {
-            // Invalid URL, allow it
-        }
-        
-        return null
-    }
-    
-    private fun createEmptyResponse(): WebResourceResponse {
-        return WebResourceResponse("text/plain", "UTF-8", null)
-    }
-    
-    private fun loadAdBlockingRules(context: Context) {
-        // Load EasyList rules
-        loadFilterFile(context, "filters/easylist.txt") { line ->
-            if (line.startsWith("||") && line.endsWith("^")) {
-                val domain = line.substring(2, line.length - 1)
-                blockedDomains.add(domain)
-            } else if (line.startsWith("/") && line.endsWith("/")) {
-                val pattern = line.substring(1, line.length - 1)
-                try {
-                    blockedPatterns.add(Regex(pattern, RegexOption.IGNORE_CASE))
-                } catch (e: Exception) {
-                    // Invalid regex, skip
-                }
-            }
-        }
-        
-        // Load EasyPrivacy rules
-        loadFilterFile(context, "filters/easyprivacy.txt") { line ->
-            if (line.startsWith("||") && line.endsWith("^")) {
-                val domain = line.substring(2, line.length - 1)
-                blockedDomains.add(domain)
-            }
+            AppLogger.e("AdBlocker", "Error checking URL for blocking: $url", e)
+            return null
         }
     }
     
-    private fun loadFilterFile(context: Context, filename: String, processor: (String) -> Unit) {
-        try {
-            context.assets.open(filename).use { inputStream ->
-                BufferedReader(InputStreamReader(inputStream)).use { reader ->
-                    reader.lineSequence().forEach { line ->
-                        if (line.isNotEmpty() && !line.startsWith("!")) {
-                            processor(line.trim())
-                        }
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            // File not found or error reading, use basic rules
-            loadBasicAdBlockingRules()
-        }
-    }
-    
-    private fun loadBasicAdBlockingRules() {
-        // Basic ad blocking rules for common ad networks
-        val basicAdDomains = listOf(
-            "doubleclick.net",
-            "googlesyndication.com",
-            "googleadservices.com",
-            "facebook.com",
-            "adnxs.com",
-            "adsystem.com",
-            "adtechus.com",
-            "advertising.com",
-            "amazon-adsystem.com",
-            "criteo.com",
-            "taboola.com",
-            "outbrain.com"
+    private fun createBlockedResponse(): WebResourceResponse {
+        return WebResourceResponse(
+            "text/plain",
+            "utf-8",
+            ByteArrayInputStream("".toByteArray())
         )
-        
-        blockedDomains.addAll(basicAdDomains)
-        
-        // Basic patterns
-        val basicPatterns = listOf(
-            ".*\\.ads\\..*",
-            ".*ads\\..*",
-            ".*adserver\\..*",
-            ".*banner\\..*",
-            ".*tracker\\..*",
-            ".*analytics\\..*"
-        )
-        
-        basicPatterns.forEach { pattern ->
-            try {
-                blockedPatterns.add(Regex(pattern, RegexOption.IGNORE_CASE))
-            } catch (e: Exception) {
-                // Invalid regex, skip
-            }
-        }
     }
-    
-    fun isAdBlockingEnabled(): Boolean = adBlockingEnabled
     
     fun getBlockedDomainsCount(): Int = blockedDomains.size
     
     fun getBlockedPatternsCount(): Int = blockedPatterns.size
-} 
+}

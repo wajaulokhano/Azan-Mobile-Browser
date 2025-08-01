@@ -1,0 +1,129 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>NSFWJS Model Diagnostic (with Class Labels)</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 24px; }
+    #log { white-space: pre-wrap; background: #222; color: #e0e0e0; padding: 1em; border-radius: 8px; height: 200px; overflow-y: auto; }
+    #output { margin-top: 24px; font-size: 1.2em; }
+    .err { color: #ff5959; }
+    .ok { color: #59ff85; }
+    .bold { font-weight: bold; }
+  </style>
+  <script src="nsfwjs.min.js"></script> <!-- Local file -->
+  <script src="tf.min.js"></script> <!-- Local file -->
+</head>
+<body>
+  <h1>NSFWJS Model Diagnostic (with Class Labels)</h1>
+  <div id="log">Loading page...</div>
+  <input type="file" id="imgInput" accept="image/*" style="margin-top:10px">
+  <button onclick="document.getElementById('imgInput').click()">Choose Image</button>
+  <div id="output"></div>
+  <canvas id="canvas" width="299" height="299" style="display:none"></canvas>
+  <script>
+    const logDiv = document.getElementById('log');
+    function log(msg, cls='') {
+      const now = new Date().toLocaleTimeString();
+      logDiv.innerHTML += `<span class="${cls}">[${now}] ${msg}</span>\n`;
+      logDiv.scrollTop = logDiv.scrollHeight;
+      console.log(msg);
+    }
+
+    const CLASS_LABELS = [
+      "drawings", "hentai", "neutral", "porn", "sexy"
+    ];
+
+    let model = null;
+    log('Page loaded. Starting diagnostics...');
+    async function loadModel() {
+      try {
+        model = await nsfwjs.load('nsfwmodel/', { type: 'graph', size: 299 }); // Path assuming nsfwmodel is in New folder
+        log('Model loaded successfully!', 'ok');
+      } catch (e) {
+        log('Model failed to load: ' + e.message, 'err');
+        log('Check that the "nsfwmodel" directory contains model.json and all shard files.', 'err');
+      }
+    }
+    loadModel();
+
+    document.getElementById('imgInput').addEventListener('change', async function(ev) {
+      if (!model) {
+        log('Model not loaded yet!', 'err');
+        return;
+      }
+      const file = ev.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        const img = new window.Image();
+        img.onload = async () => {
+          const canvas = document.getElementById('canvas');
+          const ctx = canvas.getContext('2d');
+          ctx.clearRect(0, 0, 299, 299);
+          ctx.drawImage(img, 0, 0, 299, 299);
+          log(`Canvas size: ${canvas.width}x${canvas.height}`);
+          log('Running prediction...');
+          try {
+            let pred = await model.classify(canvas);
+            let results = pred.map(r => ({
+              label: r.className,
+              prob: r.probability
+            }));
+            results.sort((a, b) => b.prob - a.prob);
+            let out = results.map(r =>
+              `<b>${r.label}:</b> ${(r.prob*100).toFixed(2)}%`
+            ).join("<br>");
+            document.getElementById('output').innerHTML = out + "<br><br><b style='font-size:1.2em;'>Prediction: <span style='color:#59ff85'>" + results[0].label.toUpperCase() + "</span> (" + (results[0].prob*100).toFixed(2) + "%)</b>";
+            log('Highest class: <b>' + results[0].label + '</b> (' + (results[0].prob*100).toFixed(2) + '%)', 'ok');
+          } catch (err) {
+            log('Prediction failed: ' + err.message, 'err');
+          }
+        };
+        img.onerror = () => log('Could not load selected image!', 'err');
+        img.src = e.target.result;
+      };
+      reader.readAsDataURL(file);
+    });
+  </script>
+</body>
+</html>

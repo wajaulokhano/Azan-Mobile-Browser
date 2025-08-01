@@ -15,7 +15,8 @@ import androidx.compose.ui.unit.sp
 @Composable
 fun SettingsScreen(
     onBack: () -> Unit,
-    onViewLogs: () -> Unit = {}
+    onViewLogs: () -> Unit = {},
+    onViewHistory: () -> Unit = {}
 ) {
     Column(
         modifier = Modifier
@@ -76,6 +77,12 @@ fun SettingsScreen(
                 SettingsSection(
                     title = "Privacy & Security",
                     items = listOf(
+                        SettingItem(
+                            title = "View History",
+                            description = "Browse your browsing history",
+                            isAction = true,
+                            onAction = onViewHistory
+                        ),
                         SettingItem(
                             title = "Clear History",
                             description = "Remove all browsing history",
